@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Conversation Analyzer</title>
+  <style>
+    :root { --bg:#f6f7fb; --card:#fff; --ink:#1d2433; --muted:#667085; --accent:#3b5bdb; --danger:#e03131; --border:#e4e7ec; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+    main { max-width:860px; margin:0 auto; padding:40px 20px 60px; }
+    h1 { margin:0 0 6px; font-size:28px; }
+    .sub { color:var(--muted); margin:0 0 28px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media (max-width:640px){ .grid{ grid-template-columns:1fr; } }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; }
+    .card h2 { font-size:16px; margin:0 0 12px; }
+    button { font:inherit; border:0; border-radius:8px; padding:10px 16px; cursor:pointer; background:var(--accent); color:#fff; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    button.rec { background:var(--danger); }
+    .timer { margin-left:10px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    input[type=file] { width:100%; margin-bottom:12px; }
+    #status { margin:20px 0 0; color:var(--muted); min-height:1.4em; }
+    #results { display:none; margin-top:20px; }
+    pre { white-space:pre-wrap; word-wrap:break-word; font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; margin:0; }
+    audio { width:100%; margin-top:8px; }
+    .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:6px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    footer { margin-top:32px; color:var(--muted); font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Voice Conversation Analyzer</h1>
+  <p class="sub">Record or upload a conversation. Gemini transcribes it with timestamps and speaker labels, analyzes each speaker's sentiment, and reads the summary back to you.</p>
+
+  <div class="grid">
+    <section class="card">
+      <h2>🎙️ Record</h2>
+      <button id="recBtn">Start recording</button><span class="timer" id="timer"></span>
+    </section>
+    <section class="card">
+      <h2>📁 Upload a file</h2>
+      <input type="file" id="fileInput" accept="audio/*">
+      <button id="uploadBtn" disabled>Analyze file</button>
+    </section>
+  </div>
+
+  <p id="status"></p>
+
+  <div id="results">
+    <section class="card">
+      <h2>Transcription</h2>
+      <pre id="transcription"></pre>
+    </section>
+    <section class="card" style="margin-top:16px">
+      <h2>Sentiment analysis</h2>
+      <pre id="sentiment"></pre>
+      <audio id="player" controls hidden></audio>
+    </section>
+  </div>
+
+  <footer>Model: {{ model }} · FastAPI · Vertex AI · Cloud Text-to-Speech</footer>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let recorder = null, chunks = [], timerId = null;
+
+  function setStatus(msg, busy = false) {
+    $("status").innerHTML = busy ? '<span class="spinner"></span>' : "";
+    $("status").append(document.createTextNode(msg));
+  }
+
+  function setBusy(busy) {
+    $("recBtn").disabled = busy;
+    $("uploadBtn").disabled = busy || !$("fileInput").files.length;
+  }
+
+  async function send(endpoint, field, blob, filename) {
+    const form = new FormData();
+    form.append(field, blob, filename);
+    setBusy(true);
+    setStatus("Analyzing… this can take up to a minute for long recordings.", true);
+    try {
+      const res = await fetch(endpoint, { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      $("transcription").textContent = data.transcription || "(no transcription)";
+      $("sentiment").textContent = data.sentiment || "(no sentiment section returned)";
+      const player = $("player");
+      if (data.audio_url) { player.src = data.audio_url; player.hidden = false; }
+      else { player.hidden = true; }
+      $("results").style.display = "block";
+      setStatus("Done.");
+    } catch (err) {
+      setStatus("Error: " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  $("recBtn").addEventListener("click", async () => {
+    if (recorder && recorder.state === "recording") { recorder.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(stream);
+      chunks = [];
+      recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(timerId); $("timer").textContent = "";
+        $("recBtn").textContent = "Start recording"; $("recBtn").classList.remove("rec");
+        const type = recorder.mimeType || "audio/webm";
+        const ext = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm";
+        send("/upload", "audio", new Blob(chunks, { type }), "recording." + ext);
+      };
+      recorder.start();
+      const started = Date.now();
+      timerId = setInterval(() => {
+        const s = Math.floor((Date.now() - started) / 1000);
+        $("timer").textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+      }, 250);
+      $("recBtn").textContent = "Stop & analyze"; $("recBtn").classList.add("rec");
+      setStatus("Recording…");
+    } catch (err) {
+      setStatus("Microphone unavailable: " + err.message);
+    }
+  });
+
+  $("fileInput").addEventListener("change", () => setBusy(false));
+  $("uploadBtn").addEventListener("click", () => {
+    const f = $("fileInput").files[0];
+    if (f) send("/analyze", "file", f, f.name);
+  });
+</script>
+</body>
+</html>
