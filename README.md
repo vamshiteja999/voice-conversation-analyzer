@@ -27,8 +27,8 @@ Browser ──audio──► FastAPI /upload or /analyze
 **Prerequisites:** Python 3.10+, a Google Cloud project with the **Vertex AI API** and **Cloud Text-to-Speech API** enabled. ffmpeg is optional and only needed for unusual audio formats.
 
 ```bash
-git clone https://github.com/vamshiteja999/Project3_kaspe.git
-cd Project3_kaspe
+git clone https://github.com/vamshiteja999/voice-conversation-analyzer.git
+cd voice-conversation-analyzer
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
