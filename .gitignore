@@ -1,0 +1,12 @@
+# Secrets — never commit cloud credentials
+*.json
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
